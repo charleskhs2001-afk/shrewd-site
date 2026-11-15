@@ -80,7 +80,7 @@ async function fetchHtml(url) {
   });
   if (!res.ok) throw new Error(`source responded ${res.status}`);
   const html = await res.text();
-  if (process.env.DEBUG_SOURCE) console.log('source', res.url.slice(0, 160), html.length, (html.match(/<title>([^<]*)/) || [])[1], (html.match(/br-oboSnOptLk|br-card|sh-buying-option/g) || []).length, [...new Set((html.match(/class="[^"]{3,40}"/g) || []).map((c) => c.slice(7, -1)))].slice(40, 160).join(' '), /captcha|challenge|unusual traffic/i.test(html));
+  if (process.env.DEBUG_SOURCE) console.log('source', res.url.slice(0, 160), html.length, (html.match(/<title>([^<]*)/) || [])[1], (html.match(/br-oboSnOptLk|br-card|sh-buying-option/g) || []).length, [...new Set((html.match(/class="[^"]{3,40}"/g) || []).map((c) => c.slice(7, -1)))].slice(40, 160).join(' '), /captcha|challenge|unusual traffic/i.test(html), (html.match(/br_errorTitle[^>]*>([\s\S]{0,300})/) || [])[1], (html.match(/br-subtitle[^>]*>([\s\S]{0,300})/) || [])[1]);
   return html;
 }
 
