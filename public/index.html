@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Shrewd: the lowest price from shops you can trust</title>
+  <meta name="description" content="Christmas shopping, sorted. Type any gift and see which trusted UK shop sells it for the least, with prices checked on the shop's own website. Free to search.">
+  <meta name="theme-color" content="#16243C">
+
+  <!-- How the link looks when shared on TikTok, Instagram, WhatsApp and messages -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Shrewd">
+  <meta property="og:title" content="Shrewd: find which trusted shop sells it for the least">
+  <meta property="og:description" content="Type any gift. We compare established UK shops, check prices on their own websites and show you the cheapest. Free to search.">
+  <meta property="og:image" content="/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Albert+Sans:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,500;0,600;1,500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip" href="#q">Skip to search</a>
+
+  <!-- Compact search that follows the shopper down the page once the main box is out of view -->
+  <div class="mini-bar" id="miniBar" aria-hidden="true">
+    <div class="wrap mini-inner">
+      <a class="brand brand-small" href="/" tabindex="-1"><svg class="star" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.6 6.9L22 9.3l-5.8 4.6 2 7.1L12 17l-6.2 4 2-7.1L2 9.3l7.4-.4z"/></svg></a>
+      <form id="miniForm" class="mini-search" role="search" autocomplete="off">
+        <label class="sr" for="miniQ">Search again</label>
+        <input id="miniQ" type="search" placeholder="Search another gift" maxlength="120" tabindex="-1">
+        <button type="submit" class="btn" tabindex="-1">Search</button>
+      </form>
+      <button type="button" class="list-btn list-btn-dark" data-open-list tabindex="-1" aria-label="Open your Christmas list">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="9" width="17" height="11.5" rx="1.5"/><path d="M12 9v11.5M3.5 13h17M12 9c-1.6-3.6-6-4.2-6-1.6C6 9 9.5 9 12 9zm0 0c1.6-3.6 6-4.2 6-1.6C18 9 14.5 9 12 9z"/></svg>
+        <span class="list-count" data-list-count>0</span>
+      </button>
+    </div>
+  </div>
+
+  <header class="cover festive" id="top">
+    <!-- Decoration only: a few slow snowflakes, switched off for anyone who prefers less motion. -->
+    <div class="snow" aria-hidden="true">
+      <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+    </div>
+    <div class="bar wrap">
+      <a class="brand" href="/"><svg class="star" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.6 6.9L22 9.3l-5.8 4.6 2 7.1L12 17l-6.2 4 2-7.1L2 9.3l7.4-.4z"/></svg><span data-site-name>Shrewd</span></a>
+      <nav class="bar-actions" aria-label="Your account">
+        <button type="button" id="dealsBtn" class="text-link" hidden>Your unlocked deals</button>
+        <button type="button" class="list-btn" data-open-list aria-label="Open your Christmas list">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="9" width="17" height="11.5" rx="1.5"/><path d="M12 9v11.5M3.5 13h17M12 9c-1.6-3.6-6-4.2-6-1.6C6 9 9.5 9 12 9zm0 0c1.6-3.6 6-4.2 6-1.6C18 9 14.5 9 12 9z"/></svg>
+          <span class="list-label">My list</span>
+          <span class="list-count" data-list-count>0</span>
+        </button>
+        <button type="button" id="memberBtn" class="btn btn-light">Membership</button>
+      </nav>
+    </div>
+
+    <div class="hero wrap">
+      <p class="season"><span>Christmas shopping, sorted</span><span class="countdown" id="countdown" hidden></span></p>
+      <h1>Find out which trusted shop sells it for the least.</h1>
+      <p class="lede">Type any gift or product. We search established UK shops, check each price on the shop's own website, and show you who is cheapest. Free to search.</p>
+      <form id="searchForm" class="search" role="search" autocomplete="off">
+        <label class="sr" for="q">What do you want to buy?</label>
+        <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+        <input id="q" name="q" type="search" placeholder="Try: LEGO Technic, Ninja air fryer, Tom Ford Oud Wood" maxlength="120" enterkeyhint="search" required>
+        <button class="btn btn-light" type="submit">Find the lowest price</button>
+      </form>
+      <div id="recent" class="recent" hidden></div>
+      <ul class="promise">
+        <li>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+          <div><strong>One search, every trusted shop</strong>No need to visit each shop's website yourself.</div>
+        </li>
+        <li>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12.5l5 5L20 6.5"/></svg>
+          <div><strong>Prices checked at the shop</strong>We confirm prices on the shop's own website wherever it lets us.</div>
+        </li>
+        <li>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5.5c0 4.2-3 7.8-7 9-4-1.2-7-4.8-7-9V6z"/><path d="M9 12l2.2 2.2L15.5 10"/></svg>
+          <div><strong>Only safe places to buy</strong><span id="reassure">Established UK retailers only. No marketplaces, no overseas drop-shippers.</span></div>
+        </li>
+      </ul>
+    </div>
+    <div class="garland" aria-hidden="true"></div>
+  </header>
+
+  <main class="wrap" id="main">
+    <div id="banner" class="banner" hidden></div>
+
+    <!-- Results sit directly under the search box so a shopper never has to hunt for them. -->
+    <section id="results" aria-live="polite"></section>
+
+    <aside class="ad" data-slot="top" aria-label="Advertisement"></aside>
+
+    <section id="deals" class="block" hidden>
+      <h2>Your unlocked deals</h2>
+      <p class="muted">Deals you have paid to unlock on this device. Prices are as they were when you unlocked them.</p>
+      <ol id="dealsList" class="offers"></ol>
+    </section>
+
+    <section class="block how" id="how">
+      <p class="eyebrow">How it works</p>
+      <h2>Three steps to the best price</h2>
+      <ol class="steps">
+        <li><h3>Search</h3><p>Type the gift as you would say it. If we cannot find an exact match, we show the closest products, and you can narrow it down by brand, type or size.</p></li>
+        <li><h3>Compare</h3><p>See every trusted shop selling it side by side, with a photo and the price, cheapest first. Like is compared with like: same product, same size.</p></li>
+        <li><h3>Buy for less</h3><p>Every price is shown. Where to buy the very cheapest is unlocked for <span data-unlock-price>£2</span>, or for all of them with membership.</p></li>
+      </ol>
+    </section>
+
+    <section class="block plans" id="plans" aria-labelledby="plansTitle">
+      <p class="eyebrow">Unlocking the best price</p>
+      <h2 id="plansTitle">Searching is free. Pay only to unlock the cheapest.</h2>
+      <p class="muted">You always see every price and every other shop. Only the shop with the very lowest price is kept for paying customers.</p>
+      <div class="plan-grid">
+        <article class="plan">
+          <h3>One deal</h3>
+          <p class="plan-price"><span data-unlock-price>£2</span><small>once</small></p>
+          <ul>
+            <li>Reveals the cheapest shop for one product</li>
+            <li>Link straight to the product</li>
+            <li>Saved on this device under "Your unlocked deals"</li>
+          </ul>
+          <p class="plan-note">Unlock from any locked price in your results.</p>
+        </article>
+        <article class="plan plan-featured">
+          <p class="plan-tag">For big Christmas lists</p>
+          <h3>Membership</h3>
+          <p class="plan-price"><span data-sub-price>£12</span><small>a month</small></p>
+          <ul>
+            <li>Every cheapest shop unlocked, on every search</li>
+            <li>Ideal when buying several gifts</li>
+            <li>Cancel at any time</li>
+          </ul>
+          <button type="button" class="btn btn-light plan-btn" data-subscribe>Become a member</button>
+        </article>
+      </div>
+    </section>
+
+    <section class="block faq" id="faq" aria-labelledby="faqTitle">
+      <p class="eyebrow">Questions</p>
+      <h2 id="faqTitle">Good to know</h2>
+      <div class="faq-list">
+        <details>
+          <summary>Is it really free to search?</summary>
+          <p>Yes. Searching, comparing and seeing every price is free, with no sign-up. You only pay if you choose to unlock the cheapest shop.</p>
+        </details>
+        <details>
+          <summary>Which shops do you include?</summary>
+          <p>Established UK retailers such as Argos, John Lewis, Boots, Currys and Amazon UK, plus UK businesses whose identity has been verified. We never include open marketplaces such as eBay, Temu or AliExpress, or overseas drop-shippers. Each price says which kind of seller it is.</p>
+        </details>
+        <details>
+          <summary>How accurate are the prices?</summary>
+          <p>Where a shop allows it, we check the price on its own website at the moment you search; those prices say "Checked at shop". Some shops block automatic checks, so their price is the latest one they have listed and says "Listed price". Delivery costs are not included. Always confirm the price on the shop's site before you buy.</p>
+        </details>
+        <details>
+          <summary>Do shops pay to appear or to be ranked higher?</summary>
+          <p>No. Shops are ordered by price, cheapest first, and nothing else.</p>
+        </details>
+        <details>
+          <summary>Will it arrive before Christmas?</summary>
+          <p>Each shop sets its own last order date for Christmas delivery. Check it on the shop's website before you order. We are not the seller, so we cannot guarantee stock or delivery.</p>
+        </details>
+        <details>
+          <summary>What is the Christmas list?</summary>
+          <p>Tap "Add to list" on any product to save it, with its lowest price. Your list adds up the total and can be shared. It is kept on your device only.</p>
+        </details>
+      </div>
+    </section>
+
+    <aside class="ad" data-slot="footer" aria-label="Advertisement"></aside>
+  </main>
+
+  <footer class="cover foot">
+    <div class="garland" aria-hidden="true"></div>
+    <div class="wrap">
+      <div class="foot-brand"><svg class="star" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.6 6.9L22 9.3l-5.8 4.6 2 7.1L12 17l-6.2 4 2-7.1L2 9.3l7.4-.4z"/></svg><span data-site-name>Shrewd</span></div>
+      <p class="foot-xmas">Buying for Christmas? Each shop sets its own last order date for delivery before Christmas. Check it on the shop's website before you order.</p>
+      <p class="foot-links"><a href="#how">How it works</a><a href="#plans">Pricing</a><a href="#faq">Questions</a><a href="/privacy.html">Privacy and cookies</a><button type="button" class="text-link" id="shareSite">Share this site</button></p>
+      <p><span data-site-name>Shrewd</span> compares prices published by retailers and, where a shop allows it, checks them on the shop's own website. Prices and stock change quickly: always confirm the price, delivery cost and delivery date on the shop's site before you buy. We are not the seller and cannot guarantee stock or delivery.</p>
+      <p>Membership is billed monthly and can be cancelled at any time.</p>
+    </div>
+  </footer>
+
+  <!-- Your Christmas list: a panel that slides in from the side -->
+  <div class="drawer-backdrop" id="listBackdrop" hidden></div>
+  <aside class="drawer" id="listDrawer" role="dialog" aria-modal="true" aria-labelledby="listTitle" hidden>
+    <div class="drawer-head">
+      <h2 id="listTitle">Your Christmas list</h2>
+      <button type="button" class="icon-btn" id="closeList" aria-label="Close your Christmas list">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="drawer-body" id="listBody"></div>
+  </aside>
+
+  <button type="button" class="to-top" id="toTop" aria-label="Back to the top" hidden>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 14l6-6 6 6"/></svg>
+  </button>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <div class="consent" id="consent" role="dialog" aria-labelledby="consentTitle" hidden>
+    <p id="consentTitle"><strong>Cookies for adverts</strong></p>
+    <p>We show adverts from Google to keep searching free. With your permission, Google may use cookies to make them more relevant. Searching works the same either way. <a href="/privacy.html">Privacy and cookies</a></p>
+    <div class="consent-actions">
+      <button type="button" class="btn btn-light" id="consentYes">Accept</button>
+      <button type="button" class="btn btn-ghost-light" id="consentNo">Reject</button>
+    </div>
+  </div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
