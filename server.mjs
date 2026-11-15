@@ -79,7 +79,9 @@ async function fetchHtml(url) {
     signal: AbortSignal.timeout(15000),
   });
   if (!res.ok) throw new Error(`source responded ${res.status}`);
-  return res.text();
+  const html = await res.text();
+  if (process.env.DEBUG_SOURCE) console.log('source', res.url.slice(0, 160), html.length, (html.match(/<title>([^<]*)/) || [])[1], (html.match(/br-oboSnOptLk|br-card|sh-buying-option/g) || []).length);
+  return html;
 }
 
 // A shop's own product page, to confirm the price. Only public https addresses, and every
