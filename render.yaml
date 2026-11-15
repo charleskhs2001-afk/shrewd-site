@@ -1,0 +1,40 @@
+# Settings for Render (render.com). Render reads this file when you choose
+# "New > Blueprint" and pick this repository. See DEPLOY.md for the steps.
+services:
+  - type: web
+    name: shrewd
+    runtime: node
+    # "starter" stays awake. "free" also works but falls asleep when nobody visits,
+    # so the first visitor after a quiet spell waits around a minute: poor for TikTok traffic.
+    plan: starter
+    region: frankfurt
+    buildCommand: echo "Nothing to build"
+    startCommand: node server.mjs
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: SITE_NAME
+        value: Shrewd
+      - key: TRUST_PROXY
+        value: "1"
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: DEV_FAKE_PAYMENTS
+        value: "0"
+      - key: CACHE_HOURS
+        value: "1"
+      # Filled in by you on Render's dashboard (see DEPLOY.md). The site's address is
+      # picked up from Render automatically; set PUBLIC_URL only for your own domain.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: ADSENSE_CLIENT
+        sync: false
+      - key: ADSENSE_SLOT_TOP
+        sync: false
+      - key: ADSENSE_SLOT_RESULTS
+        sync: false
+      - key: ADSENSE_SLOT_FOOTER
+        sync: false
+      - key: ADS_TXT
+        sync: false
