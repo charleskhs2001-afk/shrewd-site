@@ -6,7 +6,7 @@ services:
     runtime: node
     # "starter" stays awake. "free" also works but falls asleep when nobody visits,
     # so the first visitor after a quiet spell waits around a minute: poor for TikTok traffic.
-    plan: starter
+    plan: free
     region: frankfurt
     buildCommand: echo "Nothing to build"
     startCommand: node server.mjs
