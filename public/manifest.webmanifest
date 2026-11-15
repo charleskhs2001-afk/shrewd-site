@@ -1,0 +1,12 @@
+{
+  "name": "Shrewd: lowest prices from trusted shops",
+  "short_name": "Shrewd",
+  "description": "Find which trusted UK shop sells any gift for the least.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#16243C",
+  "theme_color": "#16243C",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
