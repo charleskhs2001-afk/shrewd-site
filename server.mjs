@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 
-import { runSearch } from './lib/search.mjs';
+import { runSearch, searchUrl } from './lib/search.mjs';
+import { parseSearch, looksBlocked } from './lib/parse.mjs';
 import { present } from './lib/paywall.mjs';
 import { createPayments } from './lib/payments.mjs';
 import { RETAILERS } from './lib/retailers.mjs';
@@ -73,9 +74,22 @@ const payments = createPayments({
 // ---------- price source ----------
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
 
+// Look like an ordinary UK browser visit. The cookie sets the UK market and skips the
+// cookie-consent page, which otherwise has no products on it.
+const BROWSER_HEADERS = {
+  'User-Agent': UA,
+  'Accept-Language': 'en-GB,en;q=0.9',
+  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Sec-Fetch-Dest': 'document',
+  'Sec-Fetch-Mode': 'navigate',
+  'Sec-Fetch-Site': 'none',
+  'Upgrade-Insecure-Requests': '1',
+  Cookie: 'BCP=AD=1&AL=1&SM=1; _EDGE_S=mkt=en-gb; _EDGE_CD=m=en-gb; SRCHHPGUSR=SRCHLANG=en',
+};
+
 async function fetchHtml(url) {
   const res = await fetch(url, {
-    headers: { 'User-Agent': UA, 'Accept-Language': 'en-GB,en;q=0.9', Accept: 'text/html' },
+    headers: BROWSER_HEADERS,
     signal: AbortSignal.timeout(15000),
   });
   if (!res.ok) throw new Error(`source responded ${res.status}`);
@@ -96,7 +110,7 @@ async function fetchPage(url) {
   for (let hop = 0; hop < 4; hop++) {
     if (!publicHttps(u)) throw new Error('refused');
     const res = await fetch(u, {
-      headers: { 'User-Agent': UA, 'Accept-Language': 'en-GB,en;q=0.9', Accept: 'text/html' },
+      headers: BROWSER_HEADERS,
       redirect: 'manual',
       signal: AbortSignal.timeout(5000),
     });
@@ -272,6 +286,30 @@ async function handleApi(req, res, url) {
 
   // For the host's health check: answers instantly without touching Stripe or the price source.
   if (route === 'GET /api/health') return json(res, 200, { ok: true });
+
+  // Shows what the price source sends this server for one test search. Nothing private.
+  if (route === 'GET /api/check-source') {
+    if (!allowLookup(clientIp(req))) return json(res, 429, { error: 'Try again in a few minutes.' });
+    const q = String(url.searchParams.get('q') || 'airpods pro').slice(0, 60);
+    try {
+      const r = await fetch(searchUrl(q), { headers: BROWSER_HEADERS, signal: AbortSignal.timeout(15000) });
+      const html = await r.text();
+      return json(res, 200, {
+        query: q,
+        status: r.status,
+        finalAddress: r.url.slice(0, 200),
+        bytes: html.length,
+        pageTitle: (html.match(/<title>([^<]*)/) || [])[1] || null,
+        productCardsInPage: (html.match(/class="br-item/g) || []).length,
+        productsRead: parseSearch(html).length,
+        looksBlocked: looksBlocked(html),
+        mentionsConsent: /consent|cookie preferences/i.test(html.slice(0, 30000)),
+        sample: html.replace(/<(script|style)[\s\S]*?<\/\1>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 600),
+      });
+    } catch (err) {
+      return json(res, 200, { query: q, error: err.message });
+    }
+  }
 
   if (route === 'GET /api/config') {
     const access = await getAccess(req);
