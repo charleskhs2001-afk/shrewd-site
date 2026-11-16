@@ -155,6 +155,12 @@ async function getSearch(query) {
     try {
       const result = await runSearch(key, { fetchHtml, fetchPage, allowVerified: ALLOW_VERIFIED_UK });
       result.query = query.trim().slice(0, 120);
+      // An empty result is often a one-off bad response from the source: never keep it,
+      // or every visitor sees "nothing found" for that search until the cache expires.
+      if (!result.groups?.length) {
+        console.warn('search empty:', key, 'listings seen:', result.listingsSeen);
+        return result;
+      }
       remember(key, result);
       index(result);
       writeFile(cacheFile(key), JSON.stringify(result)).catch(() => {});
