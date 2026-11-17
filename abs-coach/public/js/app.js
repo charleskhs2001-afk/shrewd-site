@@ -1181,12 +1181,13 @@ const actions = {
     const blob = await exportBackup(S);
     download(blob, `core-check-backup-${today()}.json`);
   },
-  import() {
+  import(el) {
+    if (S && !confirmTap(el, 'Tap again: this replaces what’s on this device')) return;
     const input = document.getElementById('importFile');
     input.onchange = async () => {
       const f = input.files[0];
+      input.value = '';
       if (!f) return;
-      if (S && !confirm('Restoring replaces everything on this device with the backup. Continue?')) return;
       try {
         S = await importBackup(f);
         toast('Backup restored.');
@@ -1197,14 +1198,31 @@ const actions = {
     };
     input.click();
   },
-  async 'delete-all'() {
-    if (!confirm('Delete your plan, photos and history from this device? This cannot be undone.')) return;
+  async 'delete-all'(el) {
+    if (!confirmTap(el, 'Tap again to delete everything')) return;
     await clearAll();
     S = null;
     draft = null;
+    toast('Everything has been deleted from this device.');
     go('');
   },
 };
+
+// Two-tap confirmation built into the page, since some views block browser dialogs.
+function confirmTap(el, prompt) {
+  if (el.dataset.armed === '1') return true;
+  const original = el.textContent;
+  el.dataset.armed = '1';
+  el.textContent = prompt;
+  el.classList.add('armed');
+  setTimeout(() => {
+    if (!el.isConnected) return;
+    el.dataset.armed = '';
+    el.textContent = original;
+    el.classList.remove('armed');
+  }, 5000);
+  return false;
+}
 
 function rerenderKeepScroll() {
   const y = window.scrollY;
