@@ -1,0 +1,24 @@
+# One-click setup on Render (render.com): New > Blueprint, pick this repository and set
+# "Blueprint Path" to abs-coach/render.yaml. See README.md for the full steps.
+services:
+  - type: web
+    name: core-check
+    runtime: node
+    rootDir: abs-coach
+    plan: free
+    region: frankfurt
+    buildCommand: npm ci --omit=dev
+    startCommand: node server.mjs
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: TRUST_PROXY
+        value: "1"
+      # Optional: paste your key from console.anthropic.com to switch on photo analysis.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANALYSES_PER_HOUR
+        value: "12"
+      - key: ANALYSES_PER_DAY
+        value: "300"

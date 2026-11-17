@@ -1,0 +1,2 @@
+Core Check running on http://localhost:3123
+Photo analysis: off (set ANTHROPIC_API_KEY to switch it on)

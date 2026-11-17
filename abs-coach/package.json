@@ -1,0 +1,14 @@
+{
+  "name": "core-check",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Photograph your abs, get a diet, snack allowance and workout plan, and check in every 5 days.",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.9.0"
+  }
+}
