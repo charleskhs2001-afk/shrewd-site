@@ -1,7 +1,7 @@
 // All the maths: body fat, calories, macros, meals, workouts, timeline and check-in verdicts.
 // Pure functions of the saved state, so the plan is always rebuilt from the latest numbers.
 
-import { FOODS, PROTEINS, MEALS, SNACKS, EXERCISES, PATTERNS, PATTERN_FALLBACK, SESSIONS, SPLITS, STAGES } from './data.js';
+import { FOODS, PROTEINS, MEALS, SNACKS, EXERCISES, PATTERNS, PATTERN_FALLBACK, SESSIONS, SPLITS, STAGES, AISLES } from './data.js';
 
 export const CHECKIN_DAYS = 5;
 const KCAL_PER_KG_FAT = 7700;
@@ -166,23 +166,16 @@ export function buildPlan(state) {
   const slots = p.meals === 2 ? [['lunch', 0.45], ['dinner', 0.55]] : [['breakfast', 0.28], ['lunch', 0.34], ['dinner', 0.38]];
   const proteinShares = p.meals === 2 ? [0.45, 0.55] : [0.3, 0.35, 0.35];
   const rules = dietRules(p);
-  const dayIndex = Math.floor(parseDate(today()) / 86400000);
-  const shown = new Set(); // so lunch and dinner don't lead with the same meal
   const meals = slots.map(([slot, share], i) => {
     const target = roundTo(mealKcal * share, 10);
     const proteinTarget = Math.round((protein - snackProtein) * proteinShares[i]);
     const built = MEALS.filter((m) => m.slots.includes(slot))
       .map((m) => buildMeal(m, target, proteinTarget, rules))
       .filter(Boolean);
-    // Meals within ~12% of the target come first (rotated so they change day to day),
-    // then the rest, closest first.
+    // Meals within ~12% of the target come first, then the rest, closest first.
     const fits = built.filter((o) => Math.abs(o.kcal - target) <= target * 0.12);
     const rest = built.filter((o) => !fits.includes(o)).sort((a, b) => Math.abs(a.kcal - target) - Math.abs(b.kcal - target));
-    const k = fits.length ? dayIndex % fits.length : 0;
-    const ordered = fits.slice(k).concat(fits.slice(0, k), rest);
-    const options = ordered.filter((o) => !shown.has(o.id)).concat(ordered.filter((o) => shown.has(o.id)));
-    options.slice(0, 3).forEach((o) => shown.add(o.id));
-    return { slot, target, protein: proteinTarget, options };
+    return { slot, target, protein: proteinTarget, options: fits.concat(rest), fits: fits.length };
   });
   const snacks = SNACKS.filter((s) => s.contains.every((t) => !rules.has(t)));
 
@@ -242,6 +235,78 @@ export function buildPlan(state) {
 
 function stepsTarget(activity) {
   return { sitting: 7000, light: 8000, active: 10000, very: 10000 }[activity] ?? 8000;
+}
+
+// ---------- daily menu ----------
+// One meal per slot for a given day. Rotates through the meals that fit, so each day
+// is different, and keeps lunch and dinner apart. swaps: { slot: mealId } chosen by the user.
+export function menuFor(plan, date, swaps = {}) {
+  const dayNum = daysBetween('2024-01-01', date);
+  const used = new Set();
+  return plan.meals.map((m, i) => {
+    let pick = swaps[m.slot] ? m.options.find((o) => o.id === swaps[m.slot]) : null;
+    if (!pick) {
+      const pool = m.options.slice(0, Math.max(m.fits, Math.min(3, m.options.length)));
+      for (let k = 0; k < pool.length && !pick; k++) {
+        const o = pool[(((dayNum + i * 3 + k) % pool.length) + pool.length) % pool.length];
+        if (!used.has(o.id)) pick = o;
+      }
+      pick = pick || pool[0];
+    }
+    if (pick) used.add(pick.id);
+    return { ...m, pick };
+  });
+}
+
+// The next meal option after the current one, for the "swap" button.
+export function nextOption(slotPlan, currentId) {
+  const opts = slotPlan.options;
+  const i = opts.findIndex((o) => o.id === currentId);
+  return opts[(i + 1) % opts.length];
+}
+
+const roundUp = (x, step) => Math.ceil(x / step) * step;
+const kgText = (g) => `${Number((g / 1000).toFixed(2))} kg`;
+function shopAmount(id, g, n) {
+  const f = FOODS[id];
+  if (f.unit) return f.unit.many.startsWith('slice') ? `${Math.ceil(n)} slices` : `× ${fmtCount(n)}`;
+  if (id === 'rice') {
+    const dry = roundUp(g / 2.6, 50);
+    return `${dry >= 1000 ? kgText(dry) : `${dry} g`} uncooked`;
+  }
+  if (f.ml) {
+    const ml = roundUp(g, g < 200 ? 10 : 50);
+    return ml >= 1000 ? `${Number((ml / 1000).toFixed(2))} litres` : `${ml} ml`;
+  }
+  const r = roundUp(g, g < 200 ? 10 : 50);
+  return r >= 1000 ? kgText(r) : `${r} g`;
+}
+
+// Everything needed for a run of daily menus, grouped by aisle.
+export function shoppingList(menus) {
+  const totals = new Map();
+  for (const menu of menus)
+    for (const m of menu)
+      for (const part of m.pick?.parts || []) {
+        const t = totals.get(part.id) || { g: 0, n: 0 };
+        t.g += part.g;
+        t.n += part.n || 0;
+        totals.set(part.id, t);
+      }
+  const groups = AISLES.map(([name, ids]) => ({ name, items: ids.filter((id) => totals.has(id)) }));
+  const listed = new Set(AISLES.flatMap(([, ids]) => ids));
+  const other = [...totals.keys()].filter((id) => !listed.has(id));
+  if (other.length) groups.push({ name: 'Other', items: other });
+  return groups
+    .filter((gr) => gr.items.length)
+    .map((gr) => ({
+      name: gr.name,
+      items: gr.items.map((id) => {
+        const t = totals.get(id);
+        const name = FOODS[id].name.replace(/ \((raw|cooked|dry|dry weight|drained|tinned, drained|frozen)\)$/, '').replace(/^cooked /, '');
+        return { id, name: name[0].toUpperCase() + name.slice(1), amount: shopAmount(id, t.g, t.n) };
+      }),
+    }));
 }
 
 // ---------- meals ----------
@@ -329,6 +394,7 @@ function buildMeal(t, kcalTarget, proteinTarget, ex) {
     c: Math.round(macro('c')),
     f: Math.round(macro('f')),
     items: all.map(describeItem),
+    parts: all.map(({ id, g, n }) => ({ id, g, n })),
     how: t.how.replaceAll('{p}', prot.noun),
   };
 }
@@ -404,6 +470,46 @@ export function sessionForDay(workouts, isoDay) {
   return workouts.sessions.find((s) => s.day === wd) || null;
 }
 
+// ---------- workout player ----------
+const WEIGHTED = ['gym', 'dumbbells', 'kettlebell'];
+export const isWeighted = (x) => !x.cardio && x.needs.some((n) => WEIGHTED.includes(n));
+// Seconds for a timed exercise ("20–40 s", "30 s each side"), or minutes for intervals ("12 min: ...").
+export function exerciseTimer(x) {
+  const min = String(x.reps).match(/^(\d+) min:/);
+  if (min) return { secs: Number(min[1]) * 60, label: `${min[1]} min` };
+  const s = String(x.reps).match(/(\d+)(?:–(\d+))?\s*s\b(?!\w)/);
+  if (s && !/hard|on \/|off/.test(x.reps)) return { secs: Number(s[2] || s[1]), label: `${s[2] || s[1]} s`, perSide: /each side/.test(x.reps) };
+  return null;
+}
+function restFor(x, part) {
+  if (x.cardio) return 0;
+  if (part === 'core') return 45;
+  return x.needs.includes('gym') ? 90 : 75;
+}
+// The workout as a flat list of steps: a warm-up, then one step per set.
+export function workoutSteps(session) {
+  const ex = [
+    ...session.main.map((x) => ({ ...x, part: x.cardio ? 'cardio' : 'main' })),
+    ...session.core.map((x) => ({ ...x, part: 'core' })),
+    ...(session.finisher ? [{ ...session.finisher, part: 'finisher' }] : []),
+  ];
+  const steps = [{ kind: 'warmup' }];
+  if (session.circuit) {
+    const rounds = Math.max(...ex.map((x) => x.sets));
+    for (let r = 1; r <= rounds; r++) {
+      const inRound = ex.filter((x) => x.sets >= r);
+      inRound.forEach((x, i) => steps.push({ kind: 'set', ex: x, exIndex: ex.indexOf(x), set: r, of: x.sets, round: r, rounds, rest: i === inRound.length - 1 ? 60 : 0 }));
+    }
+  } else {
+    ex.forEach((x, k) => {
+      for (let n = 1; n <= x.sets; n++) steps.push({ kind: 'set', ex: x, exIndex: k, set: n, of: x.sets, rest: restFor(x, x.part) });
+    });
+  }
+  steps.forEach((st) => (st.exCount = ex.length));
+  steps.at(-1).rest = 0;
+  return steps;
+}
+
 // ---------- check-in verdict ----------
 // prevPlan: the plan that was in force since the last check-in.
 export function evaluateCheckin(state, entry) {
@@ -461,9 +567,11 @@ export function evaluateCheckin(state, entry) {
   delta = next - current;
 
   const lines = [];
-  const kg = (x) => `${Math.abs(x).toFixed(1)} kg`;
-  lines.push(lost >= 0.05 ? `Weight: down ${kg(lost)} in ${days} days${expected > 0 ? ` (plan expected about ${kg(expected)})` : ''}.` : lost <= -0.05 ? `Weight: up ${kg(lost)} in ${days} days. Normal day-to-day swings are up to 1 kg.` : `Weight: no change in ${days} days.`);
-  if (waistLost != null) lines.push(waistLost >= 0.2 ? `Waist: ${waistLost.toFixed(1)} cm smaller.` : waistLost <= -0.2 ? `Waist: ${(-waistLost).toFixed(1)} cm bigger.` : 'Waist: no change.');
+  const imp = state.profile.units === 'imperial';
+  const kg = (x) => (imp ? `${(Math.abs(x) / 0.45359237).toFixed(1)} lb` : `${Math.abs(x).toFixed(1)} kg`);
+  const cm = (x) => (imp ? `${(Math.abs(x) / 2.54).toFixed(1)} in` : `${Math.abs(x).toFixed(1)} cm`);
+  lines.push(lost >= 0.05 ? `Weight: down ${kg(lost)} in ${days} days${expected > 0 ? ` (plan expected about ${kg(expected)})` : ''}.` : lost <= -0.05 ? `Weight: up ${kg(lost)} in ${days} days. Normal day-to-day swings are up to ${imp ? '2 lb' : '1 kg'}.` : `Weight: no change in ${days} days.`);
+  if (waistLost != null) lines.push(waistLost >= 0.2 ? `Waist: ${cm(waistLost)} smaller.` : waistLost <= -0.2 ? `Waist: ${cm(waistLost)} bigger.` : 'Waist: no change.');
   if (photo) {
     const words = { leaner: 'look leaner than last time', same: 'look about the same as last time', softer: 'look a little softer than last time', unclear: 'are hard to compare with last time (lighting or angle differ)' };
     lines.push(`Photos: ${words[photo] || 'were compared with last time'}.`);

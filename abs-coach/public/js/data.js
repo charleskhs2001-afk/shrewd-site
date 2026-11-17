@@ -332,3 +332,12 @@ export const STAGES = [
   { n: 4, name: 'Six-pack', short: 'Six-pack', desc: 'Six clear when tensed, four or more when relaxed.', bf: { male: [10, 12], female: [17, 20] } },
   { n: 5, name: 'Shredded', short: 'Shredded', desc: 'Sharp six-pack relaxed, obliques and V-lines visible.', bf: { male: [7, 10], female: [14, 17] } },
 ];
+
+// Shopping list aisles. Foods not listed here go under "Other".
+export const AISLES = [
+  ['Meat & fish', ['chicken', 'turkey_mince', 'beef_mince', 'salmon', 'white_fish', 'prawns', 'tuna']],
+  ['Dairy, eggs & tofu', ['eggs', 'egg_whites', 'greek_yogurt', 'soya_yogurt', 'cottage_cheese', 'milk', 'soya_milk', 'light_cheese', 'feta', 'tofu']],
+  ['Fruit & veg', ['banana', 'berries', 'avocado', 'potatoes', 'sweet_potato', 'broccoli', 'green_beans', 'peas', 'edamame', 'spinach', 'salad', 'cucumber_tomato', 'peppers_onion', 'stirfry_veg', 'mushrooms', 'onion']],
+  ['Bread, rice & pasta', ['oats', 'gf_oats', 'rice', 'pasta', 'gf_pasta', 'bread', 'gf_bread', 'wrap', 'gf_wrap', 'bun', 'gf_bun']],
+  ['Tins, jars & cupboard', ['chickpeas', 'black_beans', 'red_lentils', 'chopped_tomatoes', 'salsa', 'curry_paste', 'soy_sauce', 'tamari', 'olive_oil', 'peanut_butter', 'seed_butter', 'honey', 'maple', 'whey', 'vegan_protein']],
+];

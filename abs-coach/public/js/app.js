@@ -1,21 +1,27 @@
 // Core Check: screens, routing and actions.
 import { STAGES, EQUIPMENT } from './data.js';
-import { buildPlan, estimateBodyFat, evaluateCheckin, checkinStatus, today, addDays, daysBetween, sessionForDay, CHECKIN_DAYS, weekday } from './plan.js';
+import { buildPlan, estimateBodyFat, evaluateCheckin, checkinStatus, today, addDays, daysBetween, sessionForDay, CHECKIN_DAYS, weekday, menuFor, nextOption, shoppingList } from './plan.js';
 import { loadState, saveState, putPhoto, photoUrl, getPhoto, clearAll, requestPersistence, exportBackup, importBackup, photosPersistent } from './store.js';
 import { normalisePhoto, toUploadBase64, definitionScore } from './photos.js';
 import { openCamera, cameraSupported } from './camera.js';
 import { logo, torso } from './art.js';
 import { lineChart } from './charts.js';
+import { migrate, dayLog, prune, jobsFor, dayScore, streaks, workoutsThisWeek, WATER_GLASSES, GOOD_DAY } from './log.js';
+import { initWorkout, workoutPage, workoutActions, workoutUi, startWorkout, activeWorkout, findSession, onWeightInput } from './workout.js';
+import { makeDemo } from './demo.js';
 import { html, raw, str, num, fmt, fmtWeight, fmtWeightDelta, fmtLen, fmtHeight, weightParts, heightParts, KG_PER_LB, fmtDate, fmtMonth, plural, uid, toast, download, reminderCalendar } from './ui.js';
 
 const APP = 'Core Check';
 const app = document.getElementById('app');
-let S = loadState();
+let S = migrate(loadState());
 let AI = false; // true when the server can analyse photos
 let draft = null;
 let lastRoute = null;
 const sum = (arr, fn) => arr.reduce((a, x) => a + fn(x), 0);
-const save = () => saveState(S);
+const save = () => {
+  if (S) prune(S);
+  return saveState(S);
+};
 
 const DEFAULT_PROFILE = {
   units: 'metric', sex: 'male', age: null, heightCm: null, weightKg: null, activity: 'light',
@@ -24,11 +30,11 @@ const DEFAULT_PROFILE = {
   diet: 'anything', avoid: [], meals: 3, goalStage: 4, selfStage: null,
 };
 const STEPS = [
-  { id: 'you', title: 'About you' },
-  { id: 'training', title: 'Training' },
-  { id: 'food', title: 'Food' },
-  { id: 'goal', title: 'Your goal' },
-  { id: 'photos', title: 'Photos' },
+  { id: 'you', title: 'About you', sub: 'Used to work out how much you should eat.' },
+  { id: 'training', title: 'Training', sub: 'Your workouts are built around what you have.' },
+  { id: 'food', title: 'Food', sub: 'Your meals are picked and portioned from this.' },
+  { id: 'goal', title: 'Your goal', sub: 'This sets your target and how long it will take.' },
+  { id: 'photos', title: 'Photos', sub: 'Your starting point, so you can see the change.' },
 ];
 const ACTIVITY = [
   { v: 'sitting', t: 'Mostly sitting', d: 'Desk job or studying, under 5,000 steps a day' },
@@ -73,16 +79,19 @@ function render(forceTop = false) {
   if (!S && !['start', 'privacy'].includes(page)) view = landing();
   else if (page === 'start') view = onboarding();
   else if (page === 'plan') view = planPage(sub);
+  else if (page === 'workout') view = workoutPage(S, buildPlan(S)) || home();
   else if (page === 'checkin') view = checkinPage();
   else if (page === 'progress') view = progressPage();
   else if (page === 'settings') view = settingsPage();
   else if (page === 'edit') view = editPage(sub);
   else if (page === 'privacy') view = privacyPage();
   else view = home();
-  app.innerHTML = str(view);
+  const banner = S?.demo && !['start', 'workout'].includes(page) ? html`<div class="demo-bar" role="note"><span><strong>Demo</strong> · sample data to show how it works</span><button class="btn btn-primary btn-sm" data-act="end-demo">Start my own</button></div>` : '';
+  app.innerHTML = str(banner) + str(view);
   document.body.dataset.page = !S && page !== 'start' ? 'landing' : page;
   updateNav(page);
   hydrate();
+  workoutUi(page === 'workout' && !!S?.active);
   if (forceTop || location.hash !== lastRoute) {
     window.scrollTo(0, 0);
     lastRoute = location.hash;
@@ -96,7 +105,7 @@ function render(forceTop = false) {
 
 function updateNav(page) {
   const nav = document.getElementById('tabbar');
-  nav.hidden = !S || page === 'start';
+  nav.hidden = !S || page === 'start' || page === 'workout';
   nav.querySelectorAll('a').forEach((a) => {
     const on = a.dataset.page === page || (a.dataset.page === 'home' && !['plan', 'checkin', 'progress', 'settings', 'edit'].includes(page));
     if (on) a.setAttribute('aria-current', 'page');
@@ -161,8 +170,9 @@ function landing() {
     <p class="lead">Take two photos, one relaxed and one tensed, and answer a few questions. ${APP} builds your calories, a daily snack allowance and a workout plan for the kit you have, tells you roughly how long it will take, then checks your progress every ${CHECKIN_DAYS} days.</p>
     <div class="hero-cta">
       <button class="btn btn-primary btn-lg" data-act="start">Start my plan</button>
-      <span class="muted small">Takes about 3 minutes</span>
+      <button class="btn btn-ghost btn-lg" data-act="demo">See a demo</button>
     </div>
+    <p class="muted small">Takes about 3 minutes. The demo uses sample data, so you can look around first.</p>
     <div class="hero-art" aria-hidden="true">${raw([1, 3, 5].map((n) => torso(n, 92)).join(''))}</div>
   </section>
 
@@ -231,6 +241,7 @@ function onboarding() {
       <span class="muted small">${draft.step + 1}/${STEPS.length}</span>
     </div>
     <h1>${step.title}</h1>
+    <p class="lead-sm step-sub">${step.sub}</p>
     ${body}
   </div>`;
 }
@@ -572,7 +583,7 @@ async function finishOnboarding() {
     selfStage: p.selfStage, photos: ids, ai, aiError, def: { relaxed: defR, tensed: defT },
   };
   Object.assign(entry, estimateBodyFat(profile, entry, null));
-  S = { version: 1, createdAt: Date.now(), profile, entries: [entry], calorieAdjust: 0, snackLog: null, lockSkip: null };
+  S = migrate({ version: 1, createdAt: Date.now(), profile, entries: [entry], calorieAdjust: 0, lockSkip: null, log: {}, seenIntro: false });
   save();
   requestPersistence();
   try {
@@ -582,7 +593,7 @@ async function finishOnboarding() {
   draft = null;
   // Let the "building" screen show for a moment so it doesn't flash.
   await new Promise((r) => setTimeout(r, Math.max(0, 1200 - (Date.now() - started))));
-  go('plan');
+  go('');
 }
 
 // ---------- check-in lock ----------
@@ -605,6 +616,9 @@ function lockWrap(content, compact = false) {
 }
 
 // ---------- home ----------
+const SLOT = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner' };
+const flame = () => '<svg class="i flame" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c.5 3.2 4.5 5.3 4.5 10a4.5 4.5 0 0 1-9 0c0-2.2 1.2-3.6 2.3-4.6.2 1.6.9 2.6 2 3.1C11 9 11 6 12 3z"/></svg>';
+
 function checkinCard() {
   const st = checkinStatus(S);
   const elapsed = CHECKIN_DAYS - Math.max(0, st.daysUntil);
@@ -612,49 +626,132 @@ function checkinCard() {
     return html`<a class="card card-due" href="#/checkin">
       <span class="badge">Check-in</span>
       <strong class="big">${st.overdue ? `${plural(st.overdue, 'day')} overdue` : 'Due today'}</strong>
-      <span>Take your relaxed and tensed photos, then weigh in. 2 minutes.</span>
+      <span>Take your relaxed and tensed photos, then weigh in. Takes 2 minutes.</span>
       <span class="btn btn-primary">Start check-in</span>
     </a>`;
-  return html`<div class="card">
-    <div class="card-row"><span class="badge badge-soft">Next check-in</span><span class="muted small">${fmtDate(st.due)}</span></div>
-    <strong class="big">${st.daysUntil === 1 ? 'Tomorrow' : `In ${st.daysUntil} days`}</strong>
+  return html`<div class="card checkin-mini">
+    <div class="card-row"><span><span class="muted small">Next check-in</span> <strong>${st.daysUntil === 1 ? 'tomorrow' : `in ${st.daysUntil} days`}</strong></span><span class="muted small">${fmtDate(st.due)}</span></div>
     <div class="dayblocks" aria-hidden="true">${Array.from({ length: CHECKIN_DAYS }, (_, i) => html`<span class="${i < elapsed ? 'on' : ''}"></span>`)}</div>
     <button class="link small" data-act="reminders">Add reminders to my calendar</button>
   </div>`;
 }
 
+function introCard() {
+  return html`<section class="card intro">
+    <h2 class="h3">How to use ${APP}</h2>
+    <ol class="how compact">
+      <li><span class="how-n">1</span><div><strong>Every day, do your 4 jobs</strong><p>Tick them off below. Tap Start and the workout talks you through every set.</p></div></li>
+      <li><span class="how-n">2</span><div><strong>Eat from today’s menu</strong><p>It’s already portioned for you. Don’t fancy something? Tap Swap.</p></div></li>
+      <li><span class="how-n">3</span><div><strong>Every ${CHECKIN_DAYS} days, check in</strong><p>Two photos and a weigh-in. If you stall, the plan adjusts.</p></div></li>
+    </ol>
+    <button class="btn btn-ghost btn-sm" data-act="intro-ok">Got it</button>
+  </section>`;
+}
+
+function resumeCard(plan, a) {
+  const session = findSession(plan, a.sessionId);
+  if (!session) return '';
+  const sets = a.done.filter((n) => n > 0).length;
+  return html`<a class="card card-due" href="#/workout">
+    <span class="badge">${a.date === today() ? 'In progress' : `Unfinished · ${fmtDate(a.date)}`}</span>
+    <strong class="big">${session.name}</strong>
+    <span>${sets ? `${plural(sets, 'set')} done so far.` : 'Warm-up next.'}</span>
+    <span class="btn btn-primary">Resume workout</span>
+  </a>`;
+}
+
+function tickBtn(key, done, label) {
+  return html`<button class="tick" data-act="tick" data-k="${key}" aria-pressed="${done ? 'true' : 'false'}" aria-label="${label}"></button>`;
+}
+
+function jobRow(it, plan, jobs) {
+  const d = dayLog(S);
+  const cls = `job ${it.done ? 'done' : ''}`;
+  if (it.key === 'workout') {
+    const s = jobs.session;
+    const a = activeWorkout(S);
+    const n = s.main.length + s.core.length + (s.finisher ? 1 : 0);
+    return html`<li class="${cls}">
+      ${tickBtn('workout', it.done, `Workout done: ${s.name}`)}
+      <div class="job-body"><strong>${s.name}</strong><span class="muted small">${it.done ? 'Done. Nice work.' : `${n} exercises · about ${S.profile.mins} min`}</span></div>
+      ${it.done ? '' : html`<button class="btn btn-primary btn-sm" data-act="wo-start" data-session="${s.id}">${a && a.sessionId === s.id ? 'Resume' : 'Start'}</button>`}
+    </li>`;
+  }
+  if (it.key === 'steps')
+    return html`<li class="${cls}">
+      ${tickBtn('steps', it.done, `Walked ${fmt(plan.steps)} steps`)}
+      <div class="job-body"><strong>Rest day: walk ${fmt(plan.steps)} steps</strong><span class="muted small">${d.ticks.workout ? 'You trained anyway. That counts.' : html`Or do a <a href="#/plan/training">bonus workout</a>`}</span></div>
+    </li>`;
+  if (it.key === 'protein') {
+    const perMeal = Math.round(sum(plan.meals, (m) => m.protein) / plan.meals.length / 5) * 5;
+    return html`<li class="${cls}">
+      ${tickBtn('protein', it.done, `Hit ${fmt(plan.protein)} g protein`)}
+      <div class="job-body"><strong>Hit ${fmt(plan.protein)} g protein</strong><span class="muted small">About ${perMeal} g a meal, plus a protein snack</span></div>
+    </li>`;
+  }
+  if (it.key === 'water') {
+    const per = plan.water / WATER_GLASSES;
+    return html`<li class="${cls}">
+      ${tickBtn('water', it.done, `Drank ${fmt(plan.water, 1)} litres`)}
+      <div class="job-body"><strong>Drink ${fmt(plan.water, 1)} L of water</strong>
+        <span class="glasses" role="group" aria-label="Glasses of water, ${fmt(per * 1000, 0)} ml each">${Array.from({ length: WATER_GLASSES }, (_, k) => html`<button class="glass ${k < d.water ? 'full' : ''}" data-act="water" data-n="${k + 1}" aria-label="${k + 1} glass${k ? 'es' : ''}" aria-pressed="${k < d.water ? 'true' : 'false'}"></button>`)}</span>
+        <span class="muted small">${fmt(d.water * per, 1)} of ${fmt(plan.water, 1)} L · each glass is ${fmt(Math.round((per * 1000) / 10) * 10)} ml</span>
+      </div>
+    </li>`;
+  }
+  // snacks
+  return html`<li class="${cls} snack ${jobs.snackLeft < 0 ? 'over' : ''}">
+    <span class="tick auto" aria-hidden="true"></span>
+    <div class="job-body"><strong>${jobs.snackLeft >= 0 ? `Snacks: ${fmt(jobs.snackLeft)} kcal left` : `Snacks: ${fmt(-jobs.snackLeft)} kcal over`}</strong><span class="muted small">Your treat allowance is ${fmt(plan.snackKcal)} kcal a day</span></div>
+    <button class="btn btn-ghost btn-sm" data-act="goto-snacks">Log</button>
+  </li>`;
+}
+
+function menuCard(plan, menu) {
+  return html`<section class="card">
+    <div class="card-row"><h2 class="h3">Today’s menu</h2><a class="small" href="#/plan/food">Recipes →</a></div>
+    <ul class="menu">${menu.map((m) => html`<li>
+      <span class="menu-slot">${SLOT[m.slot]}</span>
+      <a class="menu-name" href="#/plan/food">${m.pick.name}<span class="muted small">${fmt(m.pick.kcal)} kcal · ${m.pick.p} g protein</span></a>
+      <button class="swap" data-act="swap" data-slot="${m.slot}" aria-label="Swap ${m.slot} for another meal">${raw(swapIcon())}<span>Swap</span></button>
+    </li>`)}</ul>
+    <p class="small muted menu-foot">Meals ${fmt(sum(menu, (m) => m.pick.kcal))} kcal + ${fmt(plan.snackKcal)} kcal of snacks = about ${fmt(plan.kcal)} kcal.</p>
+  </section>`;
+}
+const swapIcon = () => '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h13l-3.5-3.5M20 15H7l3.5 3.5"/></svg>';
+
 function home() {
   const plan = buildPlan(S);
-  const day = daysBetween(S.entries[0].date, today()) + 1;
-  const session = sessionForDay(plan.workouts, today());
   const t = plan.timeline;
-  const todayCard = html`
-    <div class="card">
-      <div class="card-row"><h2 class="h3">Today’s numbers</h2><a class="small" href="#/plan/food">Meals →</a></div>
-      <div class="stats">
-        ${stat('Calories', fmt(plan.kcal), ' kcal')}
-        ${stat('Protein', fmt(plan.protein), ' g')}
-        ${stat('Steps', fmt(plan.steps), '')}
-        ${stat('Water', fmt(plan.water, 1), ' L')}
-      </div>
-    </div>
-    <div class="card">
+  const day = daysBetween(S.entries[0].date, today()) + 1;
+  const a = activeWorkout(S);
+  const jobs = jobsFor(S, plan);
+  const done = jobs.items.filter((i) => i.done).length;
+  const st = streaks(S, plan);
+  const menu = menuFor(plan, today(), dayLog(S).meals);
+  const todayBody = html`
+    <section class="card jobs-card">
+      <div class="card-row"><h2 class="h3">Today’s 4 jobs</h2><span class="score ${done === 4 ? 'full' : done >= GOOD_DAY ? 'good' : ''}">${done} of 4 done</span></div>
+      <ol class="jobs">${jobs.items.map((it) => jobRow(it, plan, jobs))}</ol>
+      <p class="jobs-foot small">${st.current
+        ? html`${raw(flame())}<strong>${plural(st.current, 'good day')} in a row.</strong> <span class="muted">${done >= GOOD_DAY ? 'Today counts.' : `Tick ${GOOD_DAY - done} more to keep it going.`}</span>`
+        : html`<span class="muted">Tick off ${GOOD_DAY} of 4 to make today a good day and start a streak.</span>`}</p>
+    </section>
+    ${menuCard(plan, menu)}
+    <section class="card" id="snacks">
       <div class="card-row"><h2 class="h3">Snack allowance</h2><a class="small" href="#/plan/snacks">Ideas →</a></div>
       ${snackTracker(plan, true)}
-    </div>
-    <div class="card">
-      <div class="card-row"><h2 class="h3">${session ? `Today: ${session.name}` : 'Today: rest day'}</h2><a class="small" href="#/plan/training">Full plan →</a></div>
-      ${session
-        ? html`<ol class="mini-list">${session.main.concat(session.core).map((x) => html`<li><span>${x.name}</span><span class="muted">${x.sets > 1 ? `${x.sets} × ` : ''}${x.reps}</span></li>`)}</ol>`
-        : html`<p>Walk ${fmt(plan.steps)} steps and stretch. Rest is when the muscle grows.</p>`}
-    </div>`;
+    </section>`;
   return html`
   <header class="page-head">
-    <p class="eyebrow">Day ${day}</p>
-    <h1>${plan.maintenance ? 'Keep it up' : t.weeks ? `${STAGES[t.goalStage].name} in about ${t.weeksLow}–${t.weeksHigh} weeks` : 'Your plan'}</h1>
+    <p class="eyebrow">${fmtDate(today(), { weekday: 'long', day: 'numeric', month: 'long' })} · day ${day}</p>
+    <h1>Today</h1>
+    <a class="goal-line" href="#/plan/timeline">${plan.maintenance ? 'You’re at your goal. Now keep it.' : t.weeks ? `${STAGES[t.goalStage].name} in about ${t.weeksLow}–${t.weeksHigh} weeks` : 'Your plan'} →</a>
   </header>
+  ${!S.seenIntro ? introCard() : ''}
+  ${a ? resumeCard(plan, a) : ''}
   ${checkinCard()}
-  ${lockWrap(todayCard, true)}
+  ${lockWrap(todayBody, true)}
   <a class="card card-link" href="#/plan/timeline">
     <div class="card-row"><span class="muted small">Estimated body fat</span><span class="muted small">Goal ${fmt(t.targetBf, 0)}%</span></div>
     ${bfBar(plan)}
@@ -673,10 +770,7 @@ function bfBar(plan) {
 }
 
 // ---------- snacks ----------
-function todaysSnacks() {
-  if (!S.snackLog || S.snackLog.date !== today()) S.snackLog = { date: today(), items: [] };
-  return S.snackLog.items;
-}
+const todaysSnacks = () => dayLog(S).snacks;
 
 function snackTracker(plan, compact = false) {
   const items = todaysSnacks();
@@ -690,6 +784,7 @@ function snackTracker(plan, compact = false) {
     ${items.length
       ? html`<ul class="logged">${items.map((it, i) => html`<li><span>${it.name}</span><span>${fmt(it.kcal)} kcal <button class="x" data-act="snack-remove" data-i="${i}" aria-label="Remove ${it.name}">✕</button></span></li>`)}</ul>`
       : ''}
+    <p class="small muted chip-label">Tap to log:</p>
     <div class="chip-row" aria-label="Quick add a snack">${quick.map((s) => html`<button class="chip" data-act="snack-add" data-id="${s.id}">${s.name.split(' (')[0]} <span>${s.kcal}</span></button>`)}</div>
     <form data-form="snack-custom" class="inline-form">
       <label class="sr" for="snackKcal">Something else (kcal)</label>
@@ -725,14 +820,26 @@ function whereYouAre(plan) {
 
 function planPage(sub) {
   const plan = buildPlan(S);
+  if (sub === 'shopping') return shoppingPage(plan);
   const tab = ['food', 'snacks', 'training', 'timeline'].includes(sub) ? sub : 'food';
   const tabs = [['food', 'Food'], ['snacks', 'Snacks'], ['training', 'Training'], ['timeline', 'Timeline']];
   const body = { food: planFood, snacks: planSnacks, training: planTraining, timeline: planTimeline }[tab](plan);
+  const intro = {
+    food: 'Your calories, and a menu for today that already fits them.',
+    snacks: 'A daily budget for snacks and treats on top of your meals.',
+    training: 'Your week of workouts. Tap a day to see it, then Start.',
+    timeline: 'Where you are now and roughly when you’ll get there.',
+  }[tab];
   return html`
-  <header class="page-head"><p class="eyebrow">Your plan</p><h1>${{ food: 'What to eat', snacks: 'Snack allowance', training: 'Your workouts', timeline: 'How long it will take' }[tab]}</h1></header>
-  ${tab === 'food' ? whereYouAre(plan) : ''}
+  <header class="page-head"><p class="eyebrow">Your plan</p><h1>${{ food: 'What to eat', snacks: 'Snack allowance', training: 'Your workouts', timeline: 'How long it will take' }[tab]}</h1><p class="lead-sm">${intro}</p></header>
   <nav class="tabs" aria-label="Plan sections">${tabs.map(([k, label]) => html`<a href="#/plan/${k}" ${k === tab ? raw('aria-current="page"') : ''}>${label}</a>`)}</nav>
   ${tab === 'timeline' ? body : lockWrap(body)}`;
+}
+
+function mealDetail(o) {
+  return html`<ul class="ingredients">${o.items.map((x) => html`<li>${x}</li>`)}</ul>
+    <p class="how">${o.how}</p>
+    <p class="small muted">Carbs ${o.c} g · Fat ${o.f} g</p>`;
 }
 
 function planFood(plan) {
@@ -741,6 +848,7 @@ function planFood(plan) {
   if (plan.maintenance) notes.push(plan.veryLean ? 'You’re already very lean, so this is a maintenance plan. Going lower isn’t healthy to hold.' : 'You’re at your goal, so these are maintenance calories. Keep training to build thicker abs.');
   if (plan.floorHit && !plan.teen) notes.push(`Your target sits at the safe minimum of ${fmt(plan.kcal)} kcal. Instead of eating less, we’d add steps.`);
   if (plan.adjust) notes.push(`Includes a ${plan.adjust > 0 ? '+' : '−'}${fmt(Math.abs(plan.adjust))} kcal adjustment from your check-ins.`);
+  const menu = menuFor(plan, today(), dayLog(S).meals);
   return html`
   <section class="card">
     <div class="stats stats-6">
@@ -753,20 +861,31 @@ function planFood(plan) {
     </div>
     ${notes.map((n) => html`<p class="small note">${n}</p>`)}
   </section>
-  ${plan.meals.map((m) => html`
+  <div class="section-head"><h2>Today’s menu</h2><p class="hint">Weigh the amounts for the first two weeks. Veg is free: have as much as you like.</p></div>
+  ${menu.map((m) => html`
     <section class="meal-slot">
-      <div class="slot-head"><h2 class="h3">${m.slot[0].toUpperCase() + m.slot.slice(1)}</h2><span class="muted small">about ${fmt(m.target)} kcal · ${m.protein} g protein</span></div>
-      <p class="hint">Pick any one. They’re all scaled to your numbers.</p>
-      <div class="meal-list" data-more>
-        ${m.options.map((o, i) => html`<details class="meal ${i >= 3 ? 'extra' : ''}">
-          <summary><span class="meal-name">${o.name}</span><span class="meal-meta">${fmt(o.kcal)} kcal · ${o.p} g protein</span></summary>
-          <ul class="ingredients">${o.items.map((x) => html`<li>${x}</li>`)}</ul>
-          <p class="how">${o.how}</p>
-          <p class="small muted">Carbs ${o.c} g · Fat ${o.f} g</p>
-        </details>`)}
-      </div>
-      ${m.options.length > 3 ? html`<button class="link small" data-act="more-meals">Show ${m.options.length - 3} more ideas</button>` : ''}
+      <div class="slot-head"><h3 class="h3">${SLOT[m.slot]}</h3><span class="muted small">aim for about ${fmt(m.target)} kcal · ${m.protein} g protein</span></div>
+      <article class="meal-card">
+        <div class="meal-card-head"><strong class="meal-name">${m.pick.name}</strong><span class="meal-meta">${fmt(m.pick.kcal)} kcal · ${m.pick.p} g protein</span></div>
+        ${mealDetail(m.pick)}
+        <div class="row-btns">
+          <button class="btn btn-ghost btn-sm" data-act="swap" data-slot="${m.slot}">${raw(swapIcon())} Swap for another</button>
+          ${m.options.length > 1 ? html`<button class="link small" data-act="more-meals">See all ${m.options.length} options</button>` : ''}
+        </div>
+        <div class="meal-list" hidden>
+          ${m.options.filter((o) => o.id !== m.pick.id).map((o) => html`<details class="meal">
+            <summary><span class="meal-name">${o.name}</span><span class="meal-meta">${fmt(o.kcal)} kcal · ${o.p} g protein</span></summary>
+            ${mealDetail(o)}
+            <button class="btn btn-primary btn-sm" data-act="pick-meal" data-slot="${m.slot}" data-id="${o.id}">Have this today</button>
+          </details>`)}
+        </div>
+      </article>
     </section>`)}
+  <a class="card card-link shop-link" href="#/plan/shopping">
+    <span class="shop-ico" aria-hidden="true">${raw(cartIcon())}</span>
+    <span><strong>Shopping list</strong><span class="muted small">Everything for the next 7 days of menus</span></span>
+    <span aria-hidden="true">→</span>
+  </a>
   <section class="card">
     <h2 class="h3">The rules that matter</h2>
     <ul class="rules">
@@ -778,6 +897,47 @@ function planFood(plan) {
       <li><strong>Same numbers at the weekend.</strong> Two loose days can undo five good ones.</li>
     </ul>
   </section>`;
+}
+const cartIcon = () => '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2.2l2.1 10.2a1.5 1.5 0 0 0 1.5 1.2h8.4a1.5 1.5 0 0 0 1.5-1.1L20.5 8H6.1"/><circle cx="9.5" cy="19.5" r="1.3"/><circle cx="17" cy="19.5" r="1.3"/></svg>';
+
+const SHOP_DAYS = 7;
+function shopMenus(plan) {
+  return Array.from({ length: SHOP_DAYS }, (_, i) => {
+    const date = addDays(today(), i);
+    return menuFor(plan, date, S.log[date]?.meals || {});
+  });
+}
+function shopTicks() {
+  if (!S.shop || S.shop.from !== today()) S.shop = { from: today(), ticked: [] };
+  return S.shop.ticked;
+}
+function shoppingPage(plan) {
+  const groups = shoppingList(shopMenus(plan));
+  const ticked = shopTicks();
+  const total = sum(groups, (g) => g.items.length);
+  return html`
+  <header class="page-head">
+    <a class="back-link" href="#/plan/food">← What to eat</a>
+    <h1>Shopping list</h1>
+    <p class="lead-sm">For your menus from ${fmtDate(today(), { weekday: 'short', day: 'numeric', month: 'short' })} to ${fmtDate(addDays(today(), SHOP_DAYS - 1), { weekday: 'short', day: 'numeric', month: 'short' })}. Swap meals first and this list follows. Snacks aren’t included.</p>
+  </header>
+  <div class="row-btns shop-actions">
+    <button class="btn btn-primary" data-act="copy-shop">Copy list</button>
+    ${ticked.length ? html`<button class="btn btn-ghost" data-act="shop-clear">Untick all</button>` : ''}
+    <span class="muted small">${ticked.length} of ${total} ticked</span>
+  </div>
+  ${groups.map((g) => html`<section class="card shop-group">
+    <h2 class="h4">${g.name}</h2>
+    <ul class="shop">${g.items.map((it) => html`<li><label class="${ticked.includes(it.id) ? 'got' : ''}">
+      <input type="checkbox" data-change="shop" value="${it.id}" ${ticked.includes(it.id) ? raw('checked') : ''}>
+      <span class="shop-name">${it.name}</span><span class="shop-amt">${it.amount}</span>
+    </label></li>`)}</ul>
+  </section>`)}
+  <p class="hint">Amounts are rounded up. Things you already have in, just tick off.</p>
+  <textarea class="sr" id="shopText" aria-hidden="true" tabindex="-1" readonly>${shopText(groups)}</textarea>`;
+}
+function shopText(groups) {
+  return `Shopping list (${APP})\n` + groups.map((g) => `\n${g.name}\n` + g.items.map((i) => `- ${i.name}: ${i.amount}`).join('\n')).join('\n');
 }
 
 function planSnacks(plan) {
@@ -813,35 +973,59 @@ function exItem(x) {
   </li>`;
 }
 
+const shortName = (n) => n.replace('Full body ', 'Full ').replace('Upper body ', 'Upper ').replace('Legs & abs ', 'Legs ').replace('Abs & conditioning', 'Abs+cardio');
+let trainDay = null; // the day picked on the Training tab
+
+function startButton(s, label = 'Start this workout') {
+  const a = activeWorkout(S);
+  return html`<button class="btn btn-primary btn-block" data-act="wo-start" data-session="${s.id}">${a && a.sessionId === s.id ? 'Resume workout' : label}</button>`;
+}
+
 function planTraining(plan) {
   const p = S.profile;
   const w = plan.workouts;
   const kitNames = p.gym ? 'Gym' : p.equipment.length ? EQUIPMENT.filter((e) => p.equipment.includes(e.id)).map((e) => e.name).join(', ') : 'Bodyweight only';
-  const todaySession = sessionForDay(w, today());
-  return html`
-  <section class="card">
-    <p class="small muted">${p.days} days a week · ${p.mins} min · ${kitNames} · <a href="#/edit/training">change</a></p>
-    <div class="week" role="list">${[1, 2, 3, 4, 5, 6, 7].map((d) => {
-      const s = w.sessions.find((x) => x.day === d);
-      const isToday = weekday(today()) === d;
-      return html`<div role="listitem" class="wd ${s ? 'train' : ''} ${isToday ? 'today' : ''}"><span>${DAY_NAMES[d]}</span><strong>${s ? s.name.replace('Full body ', 'Full ').replace('Upper body ', 'Upper ').replace('Legs & abs ', 'Legs ').replace('Abs & conditioning', 'Abs+cardio') : 'Walk'}</strong></div>`;
-    })}</div>
-    <p class="small">Rest days: aim for ${fmt(plan.steps)} steps. Moving more is the easiest extra fat loss there is.</p>
-  </section>
-  ${w.sessions.map((s) => html`
-    <section class="card session ${todaySession && todaySession.id === s.id ? 'is-today' : ''}">
-      <div class="card-row"><h2 class="h3">${s.name}</h2><span class="badge badge-soft">${DAY_NAMES[s.day]}${todaySession && todaySession.id === s.id ? ' · today' : ''}</span></div>
-      <p class="small muted">Warm up for 5 min: brisk walk or march, 10 bodyweight squats, arm circles, then one light set of the first exercise.${s.circuit ? ' Do it as a circuit: one set of each, back to back, then go round again.' : ' Rest 60–90 s between sets.'}</p>
+  const todayWd = weekday(today());
+  const sel = trainDay || todayWd;
+  const s = w.sessions.find((x) => x.day === sel);
+  const wk = workoutsThisWeek(S, plan);
+  const lastDone = (id) => [...(S.workoutHistory || [])].reverse().find((h) => h.sessionId === id);
+  let detail;
+  if (s) {
+    const last = lastDone(s.id);
+    detail = html`<section class="card session">
+      <div class="card-row"><h2 class="h3">${s.name}</h2><span class="badge badge-soft">${DAY_NAMES[s.day]}${s.day === todayWd ? ' · today' : ''}</span></div>
+      <p class="small muted">${s.main.length + s.core.length + (s.finisher ? 1 : 0)} exercises · about ${p.mins} min${last ? ` · last done ${fmtDate(last.date)}` : ''}</p>
+      ${startButton(s)}
+      <p class="small muted session-how">Workout mode takes you through it one set at a time, with a rest timer. ${s.circuit ? 'This one is a circuit: one set of each exercise back to back, then go round again.' : 'Rest 60–90 s between sets.'}</p>
       <ol class="ex-list">${s.main.map(exItem)}</ol>
       <h3 class="h4">Abs</h3>
       <ol class="ex-list">${s.core.map(exItem)}</ol>
       ${s.finisher ? html`<h3 class="h4">Finisher</h3><ol class="ex-list">${exItem(s.finisher)}</ol>` : ''}
-    </section>`)}
+    </section>`;
+  } else {
+    detail = html`<section class="card">
+      <div class="card-row"><h2 class="h3">Rest day</h2><span class="badge badge-soft">${DAY_NAMES[sel]}${sel === todayWd ? ' · today' : ''}</span></div>
+      <p>Walk ${fmt(plan.steps)} steps and stretch for 5 minutes. Rest is when the muscle grows, and walking is the easiest extra fat loss there is.</p>
+      <p class="small muted">Missed a workout or feeling fresh? Do one of these instead:</p>
+      <div class="stack-btns">${w.sessions.filter((x, i, arr) => arr.findIndex((y) => y.name === x.name) === i).map((x) => html`<button class="btn btn-ghost btn-block" data-act="wo-start" data-session="${x.id}">${x.name}</button>`)}</div>
+    </section>`;
+  }
+  return html`
+  <section class="card">
+    <p class="small muted">${p.days} days a week · ${p.mins} min · ${kitNames} · <a href="#/edit/training">change</a></p>
+    <div class="week">${[1, 2, 3, 4, 5, 6, 7].map((d) => {
+      const x = w.sessions.find((y) => y.day === d);
+      return html`<button class="wd ${x ? 'train' : ''} ${d === todayWd ? 'today' : ''}" data-act="pick-day" data-day="${d}" aria-pressed="${d === sel ? 'true' : 'false'}"><span>${DAY_NAMES[d]}</span><strong>${x ? shortName(x.name) : 'Walk'}</strong></button>`;
+    })}</div>
+    <p class="small week-note"><strong>${wk.done} of ${wk.planned}</strong> workouts done this week.</p>
+  </section>
+  ${detail}
   <section class="card">
     <h2 class="h3">How to progress</h2>
     <ul class="rules">
       <li><strong>Stop 1–2 reps before failure</strong> on every set. The last reps should be hard.</li>
-      <li><strong>Hit the top of the rep range on every set?</strong> Next time add a little weight, or switch to the harder version.</li>
+      <li><strong>Hit the top of the rep range on every set?</strong> Next time add a little weight, or switch to the harder version. Workout mode remembers the weight you used.</li>
       <li><strong>Train abs like any muscle.</strong> Add reps, then weight. A thicker six-pack shows at a higher body fat.</li>
       <li><strong>You can’t burn stomach fat with crunches.</strong> Fat comes off everywhere at once; the diet does that part.</li>
     </ul>
@@ -852,11 +1036,12 @@ function planTimeline(plan) {
   const t = plan.timeline;
   const p = S.profile;
   if (plan.maintenance)
-    return html`<section class="card card-hero"><p class="huge">You’re there</p>
+    return html`${whereYouAre(plan)}<section class="card card-hero"><p class="huge">You’re there</p>
       <p>${plan.veryLean ? 'You’re already very lean. We won’t push you lower; the plan keeps you here while you build thicker abs.' : `At around ${fmt(plan.bf, 0)}% you’re at your goal. Maintenance calories and progressive ab training will sharpen things from here.`}</p>
       ${p.goalStage < 5 && !plan.teen ? html`<a class="btn btn-ghost" href="#/edit/goal">Set a bigger goal</a>` : ''}</section>`;
   const units = p.units;
   return html`
+  ${whereYouAre(plan)}
   <section class="card card-hero">
     <p class="eyebrow">To ${STAGES[t.goalStage].name.toLowerCase()}</p>
     <p class="huge">${t.weeksLow}–${t.weeksHigh}<small> weeks</small></p>
@@ -929,7 +1114,7 @@ function checkinPage() {
     <fieldset class="field"><legend class="label">Tensed, which looks most like you now?</legend>
       ${choiceCards('selfStage', STAGES.map((s) => ({ v: s.n, t: s.short, art: torso(s.n, 36) })), draft.selfStage, { cls: 'stages compact' })}
     </fieldset>
-    <button class="btn btn-primary btn-block btn-lg" type="submit">${AI && S.profile.age >= 18 ? 'Analyse my check-in' : 'See how I’m doing'}</button>
+    <button class="btn btn-primary btn-block btn-lg" type="submit">${AI && S.profile.age >= 18 && !S.demo ? 'Analyse my check-in' : 'See how I’m doing'}</button>
   </form>`;
 }
 
@@ -941,7 +1126,7 @@ async function finishCheckin() {
   const started = Date.now();
   let ai = null;
   let aiError = null;
-  if (AI && p.age >= 18) {
+  if (AI && p.age >= 18 && !S.demo) {
     try {
       ai = await analysePhotos({ profile: p, weightKg: draft.weightKg, waistCm: draft.waistCm, selfStage: draft.selfStage, photos: draft.photos, previous: prev });
     } catch (e) {
@@ -1021,7 +1206,9 @@ function progressPage() {
   const toIdx = compare.to < 0 ? E.length + compare.to : compare.to;
   return html`
   <header class="page-head"><p class="eyebrow">${plural(E.length - 1, 'check-in')} so far</p><h1>Progress</h1></header>
+  ${habitsCard(plan)}
   <section class="card">
+    <h2 class="h3">Before and after</h2>
     <div class="card-row">${seg('pose', [['relaxed', 'Relaxed'], ['tensed', 'Tensed']], compare.pose)}</div>
     ${E.length > 1
       ? html`<div class="compare" data-compare>
@@ -1044,8 +1231,9 @@ function progressPage() {
     ${raw(lineChart({ label: 'Definition score (tensed photo, on-device)', unit: '', decimals: 0, points: E.map((e) => ({ x: e.date, y: e.def?.tensed ?? null })) }))}
     <p class="small muted">The definition score measures contrast across your stomach in the tensed photo. Lighting changes it, so only trust the trend when your photos are taken in the same spot.</p>
   </section>
+  ${workoutsCard()}
   <section class="card">
-    <h2 class="h3">History</h2>
+    <h2 class="h3">Check-in history</h2>
     <ol class="history">${E.slice().reverse().map((e, i) => html`<li>
       <div class="hist-photos">${photoTile(e.photos?.relaxed, 'Relaxed', 'thumb')}${photoTile(e.photos?.tensed, 'Tensed', 'thumb')}</div>
       <div>
@@ -1053,6 +1241,47 @@ function progressPage() {
         <p class="small">${fmtWeight(e.weightKg, units)}${e.waistCm ? ` · waist ${fmtLen(e.waistCm, units)}` : ''} · ~${fmt(e.bf, 0)}% body fat</p>
         ${e.verdict ? html`<p class="small muted">${e.verdict.headline}</p>` : ''}
       </div>
+    </li>`)}</ol>
+  </section>`;
+}
+
+function habitsCard(plan) {
+  const st = streaks(S, plan);
+  const wk = workoutsThisWeek(S, plan);
+  const t = today();
+  const start = addDays(t, 1 - weekday(t) - 21); // Monday, three weeks before this one
+  const first = S.entries[0].date;
+  const cells = Array.from({ length: 28 }, (_, i) => {
+    const date = addDays(start, i);
+    if (date > t) return { date, cls: 'future', label: `${fmtDate(date)}: still to come` };
+    if (date < first) return { date, cls: 'before', label: `${fmtDate(date)}: before you started` };
+    const sc = dayScore(S, plan, date);
+    return { date, cls: sc == null ? 'none' : `lv${sc}`, label: `${fmtDate(date)}: ${sc == null ? 'nothing logged' : `${sc} of 4 jobs`}`, today: date === t };
+  });
+  return html`<section class="card">
+    <div class="card-row"><h2 class="h3">Daily habits</h2><span class="muted small">last 4 weeks</span></div>
+    <div class="stats stats-3">
+      ${stat('Streak', st.current, st.current === 1 ? ' day' : ' days', 'good days in a row')}
+      ${stat('Best', st.best, st.best === 1 ? ' day' : ' days')}
+      ${stat('This week', `${wk.done}/${wk.planned}`, '', 'workouts')}
+    </div>
+    <div class="heat" role="list" aria-label="Days in the last four weeks">
+      ${['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d) => html`<span class="heat-h" aria-hidden="true">${d}</span>`)}
+      ${cells.map((c) => html`<span role="listitem" class="heat-c ${c.cls} ${c.today ? 'is-today' : ''}" title="${c.label}" aria-label="${c.label}"></span>`)}
+    </div>
+    <p class="heat-key small muted"><span class="heat-c lv0"></span> none <span class="heat-c lv2"></span> 2 jobs <span class="heat-c lv4"></span> all 4 · a good day is ${GOOD_DAY} or more</p>
+  </section>`;
+}
+
+function workoutsCard() {
+  const H = S.workoutHistory || [];
+  if (!H.length) return '';
+  const u = S.profile.units === 'imperial' ? 'lb' : 'kg';
+  return html`<section class="card">
+    <div class="card-row"><h2 class="h3">Workouts</h2><span class="muted small">${plural(H.length, 'workout')} logged</span></div>
+    <ol class="wo-history">${H.slice(-6).reverse().map((h) => html`<li>
+      <span><strong>${h.name}</strong><span class="muted small">${fmtDate(h.date)} · ${h.mins} min · ${h.sets}/${h.of} sets</span></span>
+      ${Object.keys(h.weights || {}).length ? html`<span class="muted small">top ${fmt(Math.max(...Object.values(h.weights)), 1).replace('.0', '')} ${h.unit || u}</span>` : ''}
     </li>`)}</ol>
   </section>`;
 }
@@ -1069,6 +1298,12 @@ function settingsPage() {
     ${row('Training', `${kit} · ${p.days} days · ${p.mins} min`, '#/edit/training')}
     ${row('Food', `${DIETS.find((d) => d.v === p.diet)?.t}${p.avoid.length ? `, ${p.avoid.map((a) => AVOID.find((x) => x.v === a)?.t).join(', ')}` : ''} · ${p.meals} meals`, '#/edit/food')}
     ${row('Goal', STAGES[p.goalStage].name, '#/edit/goal')}
+  </section>
+  <section class="card">
+    <h2 class="h3">Workout mode</h2>
+    <p class="small">A beep and a buzz when a rest or timer ends. The screen stays on while a workout is open.</p>
+    <button class="btn btn-ghost" data-act="toggle-sound" aria-pressed="${S.prefs?.sound === false ? 'false' : 'true'}">Timer sound: ${S.prefs?.sound === false ? 'off' : 'on'}</button>
+    <button class="link small settings-tips" data-act="show-intro">Show the “How to use” tips again</button>
   </section>
   <section class="card">
     <h2 class="h3">Reminders</h2>
@@ -1156,7 +1391,8 @@ const actions = {
     todaysSnacks().push({ name: s.name, kcal: s.kcal });
     save();
     rerenderKeepScroll();
-    toast(`Added ${s.name.split(' (')[0]}`);
+    const left = buildPlan(S).snackKcal - sum(todaysSnacks(), (i) => i.kcal);
+    toast(`Added ${s.name.split(' (')[0]} · ${left >= 0 ? `${fmt(left)} kcal left` : `${fmt(-left)} kcal over`}`);
   },
   'snack-remove'(el) {
     todaysSnacks().splice(Number(el.dataset.i), 1);
@@ -1164,9 +1400,117 @@ const actions = {
     rerenderKeepScroll();
   },
   'more-meals'(el) {
-    el.previousElementSibling.classList.add('show-all');
+    const list = el.closest('.meal-card')?.querySelector('.meal-list');
+    if (list) list.hidden = false;
     el.remove();
   },
+  tick(el) {
+    const d = dayLog(S);
+    const k = el.dataset.k;
+    if (k === 'water') d.water = d.water >= WATER_GLASSES ? 0 : WATER_GLASSES;
+    else d.ticks[k] = !d.ticks[k];
+    save();
+    rerenderKeepScroll();
+    const plan = buildPlan(S);
+    const n = jobsFor(S, plan).items.filter((i) => i.done).length;
+    if ((k === 'water' ? d.water : d.ticks[k]) && n === 4) toast('All 4 done. That’s a good day.');
+  },
+  water(el) {
+    const d = dayLog(S);
+    const n = Number(el.dataset.n);
+    d.water = d.water === n ? n - 1 : n;
+    save();
+    rerenderKeepScroll();
+    if (d.water === WATER_GLASSES) toast('Water done for today.');
+  },
+  swap(el) {
+    const plan = buildPlan(S);
+    const d = dayLog(S);
+    const menu = menuFor(plan, today(), d.meals);
+    const m = menu.find((x) => x.slot === el.dataset.slot);
+    if (!m) return;
+    const others = new Set(menu.filter((x) => x !== m).map((x) => x.pick.id));
+    let next = nextOption(m, m.pick.id);
+    for (let k = 0; k < m.options.length && others.has(next.id); k++) next = nextOption(m, next.id);
+    d.meals[m.slot] = next.id;
+    save();
+    rerenderKeepScroll();
+    toast(`${SLOT[m.slot]}: ${next.name}`);
+  },
+  'pick-meal'(el) {
+    dayLog(S).meals[el.dataset.slot] = el.dataset.id;
+    save();
+    rerenderKeepScroll();
+    toast(`${SLOT[el.dataset.slot]} swapped`);
+  },
+  'goto-snacks'() {
+    const box = document.getElementById('snacks');
+    if (!box) return go('plan/snacks');
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setTimeout(() => box.querySelector('.chip')?.focus({ preventScroll: true }), 400);
+  },
+  'pick-day'(el) {
+    trainDay = Number(el.dataset.day);
+    rerenderKeepScroll();
+  },
+  'wo-start'(el) {
+    startWorkout(S, el.dataset.session);
+    save();
+    go('workout');
+  },
+  'intro-ok'() {
+    S.seenIntro = true;
+    save();
+    rerenderKeepScroll();
+  },
+  'show-intro'() {
+    S.seenIntro = false;
+    save();
+    go('');
+  },
+  'toggle-sound'() {
+    S.prefs = S.prefs || {};
+    S.prefs.sound = S.prefs.sound === false;
+    save();
+    rerenderKeepScroll();
+  },
+  async 'copy-shop'() {
+    const text = document.getElementById('shopText')?.value || '';
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('Shopping list copied. Paste it into your notes.');
+    } catch {
+      const ta = document.getElementById('shopText');
+      if (ta) {
+        ta.classList.remove('sr');
+        ta.removeAttribute('aria-hidden');
+        ta.rows = 12;
+        ta.focus();
+        ta.select();
+      }
+      toast('Copy didn’t work here. The list is selected: copy it from the box.');
+    }
+  },
+  'shop-clear'() {
+    S.shop = { from: today(), ticked: [] };
+    save();
+    rerenderKeepScroll();
+  },
+  async demo() {
+    toast('Loading the demo…');
+    S = migrate(await makeDemo());
+    save();
+    draft = null;
+    go('');
+  },
+  async 'end-demo'(el) {
+    if (!confirmTap(el, 'Tap again: clears the demo')) return;
+    await clearAll();
+    S = null;
+    draft = newOnboardDraft();
+    go('start');
+  },
+  ...workoutActions,
   'done-checkin'() {
     draft = null;
   },
@@ -1189,7 +1533,7 @@ const actions = {
       input.value = '';
       if (!f) return;
       try {
-        S = await importBackup(f);
+        S = migrate(await importBackup(f));
         toast('Backup restored.');
         go('');
       } catch (e) {
@@ -1316,6 +1660,14 @@ document.addEventListener('change', (e) => {
     compare.pose = t.value;
     return rerenderKeepScroll();
   }
+  if (t.dataset.change === 'shop') {
+    const ticked = shopTicks();
+    const i = ticked.indexOf(t.value);
+    if (t.checked && i < 0) ticked.push(t.value);
+    if (!t.checked && i >= 0) ticked.splice(i, 1);
+    save();
+    return rerenderKeepScroll();
+  }
   if (t.dataset.change === 'compare-from') {
     compare.from = Number(t.value);
     return rerenderKeepScroll();
@@ -1328,6 +1680,7 @@ document.addEventListener('change', (e) => {
 
 document.addEventListener('input', (e) => {
   if (e.target.dataset.input === 'compare') e.target.closest('[data-compare]').style.setProperty('--pos', `${e.target.value}%`);
+  if (e.target.dataset.input === 'wo-weight') onWeightInput(e.target);
 });
 
 // ---------- start ----------
@@ -1347,6 +1700,7 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
+initWorkout({ state: () => S, plan: () => buildPlan(S), save, render, go });
 render();
 detectAI().then(() => {
   const page = route().page;

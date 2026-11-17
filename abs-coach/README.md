@@ -2,12 +2,16 @@
 
 A mobile-first website where you photograph your stomach (one relaxed, one tensed) and get:
 
-- **A diet**: daily calories, protein, carbs, fat, fibre and water, plus breakfast, lunch and dinner ideas with gram amounts scaled to your numbers. Works for anything / no pork / pescatarian / vegetarian / vegan, with dairy-, gluten- and nut-free swaps.
+- **A Today screen with 4 jobs**: the workout (or a walk on rest days), your protein, your water (tap the glasses) and staying inside your snack allowance. Tick 3 of 4 for a "good day" and build a streak.
+- **A diet**: daily calories, protein, carbs, fat, fibre and water, and a menu for each day (breakfast, lunch and dinner) with gram amounts scaled to your numbers. Don't fancy a meal? Tap **Swap**. Works for anything / no pork / pescatarian / vegetarian / vegan, with dairy-, gluten- and nut-free swaps.
+- **A shopping list** for the next 7 days of menus, grouped by aisle, with tick boxes and a copy button.
 - **A snack allowance**: a daily calorie budget for snacks and treats, with a tap-to-log tracker that shows what's left.
 - **A workout routine** built for a gym, or for home with whatever kit you tick (dumbbells, kettlebell, bands, pull-up bar, bench, ab wheel, skipping rope, a chair, or nothing at all). It covers 2–6 days a week and 20–60 minute sessions, and every session includes ab work.
+- **Workout mode**: tap Start and it takes you through the warm-up and every set, with a rest timer (beeps and buzzes when it's time), timers for planks and intervals, and a note of the weight you used so it can tell you what you lifted last time. The screen stays on while it's open.
 - **A timeline**: roughly how many weeks until your goal (four-pack, six-pack or shredded), with a date range and milestones.
 - **Check-ins every 5 days**: two new photos (the camera shows a faint "ghost" of last time so you line up the same) and a weigh-in. It tells you whether it's working and adjusts calories if progress stalls. When a check-in is due, today's plan is blurred until you do it (or tap "Not today"). You can also add repeating calendar reminders.
-- **Progress**: before/after photo slider, weight, waist and body-fat charts, full history.
+- **Progress**: a 4-week habit calendar and streaks, recent workouts, a before/after photo slider, weight, waist and body-fat charts, and the full check-in history.
+- **A demo**: "See a demo" on the front page loads sample data (drawn photos, three check-ins, two weeks of ticks and workouts) so people can look around before taking their own photos. "Start my own" clears it.
 
 Everything is saved on the user's own phone (no accounts). Under-18s get a gentler plan and their photos are never sent anywhere.
 
@@ -96,7 +100,10 @@ abs-coach/
   public/             the website (works on its own as static files)
     index.html, styles.css, sw.js, manifest.webmanifest, icons
     js/app.js         screens and navigation
-    js/plan.js        calories, macros, meals, workouts, timeline, check-in verdicts
+    js/plan.js        calories, macros, meals, daily menus, shopping list, workouts, timeline, check-in verdicts
+    js/log.js         the daily ticks, water, snacks, streaks
+    js/workout.js     workout mode: sets, rest timer, weights
+    js/demo.js        the sample account behind "See a demo"
     js/data.js        foods, meals, snacks, exercises
     js/camera.js      in-page camera with guide, timer and ghost overlay
     js/photos.js      resizing and the on-device definition score
